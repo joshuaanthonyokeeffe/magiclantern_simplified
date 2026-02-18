@@ -75,6 +75,11 @@
 #define YUV422_LV_BUFFER_DISPLAY_ADDR DV_VRAM_ACTIVE
 #define YUV422_LV_PITCH               720
 
+    /* First-guess: inherited from 7D2 (same DIGIC 6 silicon, channel EDMAC_WRITE_14 = ch33).
+       0xD0004200 = 0xD0000000 + 33 * 0x200. Verify by tracing SetEDmac calls during LiveView.
+       If wrong, edmac_scan.mo identifies the correct channel. */
+    #define RAW_LV_EDMAC_CHANNEL_ADDR 0xd0004200
+
     #define YUV422_HD_BUFFER_DMA_ADDR 0x0 // it expects this to be shamem_read(some_DMA_ADDR)
 
     #define HALFSHUTTER_PRESSED         0
