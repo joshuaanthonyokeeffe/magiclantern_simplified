@@ -206,33 +206,111 @@ DATA_PTR(    0xe4a0,  LiveViewApp_dialog)                   // in StartLiveViewA
 /**
  * EDMAC — Engine DMA Controller
  *
- * Addresses found by FindEDMAC_D6.py against ROM1.BIN dumped from firmware 1.0.2.
- * ROM-space addresses are expected to be stable between 1.0.2 and 1.0.3;
- * verify in Ghidra and re-run against a 1.0.3 dump when available.
+ * --- ARCHITECTURE (confirmed from ROM1.BIN analysis, 2026-02-18) ---
  *
- * DIGIC 6 EDMAC base: 0xD0000000, stride 0x200/channel.
- * RAW_LV_EDMAC_CHANNEL_ADDR = 0xD0004200 (ch33, EDMAC_WRITE_14) — from consts.h.
- * shamem_read(RAW_LV_EDMAC_CHANNEL_ADDR + 0x08) returns the DRAM buffer pointer.
+ * DIGIC 6 (80D) does NOT use 0xD0000000 + N×0x200 stride as assumed.
+ * Instead, Canon uses a lookup TABLE at 0xfeb53e30 (48 entries × 12 bytes each):
+ *   entry[i] = { type_field (u32), mmio_addr (u32), handler_fn (u32) }
+ * Channel MMIO addresses use 0x100 stride within each bank:
+ *   Bank 0: 0xD0004000–0xD0004600 (channels 0–6, stride 0x100)
+ *   Bank 1: 0xD0026000–... (channels 7–13)
+ *   Bank 2: 0xD0030000–... (channels 14–24)
+ *   Bank 3: 0xD0057000–... (channels 25–36, handler fn@0xfe338ddb)
+ *   Bank 4: 0xD0058000–... (channels 37+)
+ * RAW_LV_EDMAC_CHANNEL_ADDR = 0xD0004200 = table entry[2].mmio_addr → Canon channel 2.
+ * shamem_read(0xD0004200 + 0x08) returns the DMA buffer pointer written by ConnectWriteEDmac.
  *
- * Confidence ratings from FindEDMAC_D6.py:
- *   HIGH   = string-proximity confirmed, safe to use
- *   MEDIUM = pattern + MMIO literal match, verify in Ghidra
- *   LOW    = cluster detected, ordering unconfirmed — verify before enabling
+ * --- MMIO HELPER FUNCTIONS ---
+ * fn@0xfe420caa — shadowed MMIO write(addr, value): writes to shadow array + real MMIO
+ * fn@0xfe420cd8 — shadow read(addr): reads from shadow array (mirror of MMIO state)
+ * fn@0xfe420ce4 — locked RMW(addr, AND_mask, OR_value): atomic read-modify-write
+ * fn@0xfe420d0a — bulk MMIO write(mmio_base, *src_array, n_words): shadow+real, n_words words
+ *
+ * --- EDMAC FUNCTION CLUSTER (0xfe338136–0xfe3384ca) found via "Edmac/Edmac.c" string ---
+ * The cluster was located by finding the assert string "Edmac/Edmac.c" at 0xfe338511 and
+ * tracing back through its xrefs to the function block that precedes it.
+ *
+ * --- CALLBACK TABLE LAYOUT ---
+ * Completion ISR type 1 (ch 0–24, handler fn@0xfe338d09):
+ *   Reads callback fn_ptr from 0x424b8 + ch×4 (type_1_cbr_table, 4B/entry)
+ *   Reads callback + ctx from 0x42578 + ch×12 and calls fn(ctx) after MMIO ops
+ * Completion ISR type 2 (ch 25+, handler fn@0xfe338ddb):
+ *   Reads callback fn from 0x42578 + ch×12, ctx from +4, calls fn(ctx)
+ * RegisterEDmacCompleteCBR write path: NOT FOUND in ROM scan — likely written during
+ *   Canon's EDMAC init or accessed via a different indirection.  Keep as no-op stub.
+ *
+ * --- PHASE 2 FALSE POSITIVES (FindEDMAC_D6.py) ---
+ * Capstone found 0 BL/BLX calls to _EngDrvOut (0xfe15aec0) in 32 MB ROM.
+ * Canon does NOT call _EngDrvOut internally — it is an ML MMIO thunk only.
+ * Phase 2 "EDMAC" candidates (0xFE0Axxx) arose from code bytes at aligned boundaries
+ * accidentally matching the 0xD000xxxx 4-byte pattern when read as data — scanner flaw.
+ *
+ * --- CONFIDENCE RATINGS ---
+ *   HIGH          = verified correct (disassembly matches expected instructions)
+ *   POSSIBLE      = plausible candidate, not confirmed on hardware
+ *   FALSE_POSITIVE = disassembly proved wrong function type
  */
 
-/** EDMAC cluster — SetEDmac / Connect* / StartEDmac / Abort* / CBR registration **/
-/** All detected in tight cluster 0xFE0Axxxx-0xFE0Cxxxx; ordering needs Ghidra confirmation **/
-//THUMB_FN(0xfe0af2f7, SetEDmac                           ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
-//THUMB_FN(0xfe0b2221, ConnectWriteEDmac                  ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
-//THUMB_FN(0xfe0bcaf3, ConnectReadEDmac                   ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
-//THUMB_FN(0xfe0bdff9, StartEDmac                         ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
-//THUMB_FN(0xfe0c3033, AbortEDmac                         ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
-//THUMB_FN(0xfe0c8937, RegisterEDmacCompleteCBR           ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
-//THUMB_FN(0xfe0c8c8f, UnregisterEDmacCompleteCBR         ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
-//THUMB_FN(0xfe0c93c5, RegisterEDmacAbortCBR              ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
-//THUMB_FN(0xfe0c93dd, UnregisterEDmacAbortCBR            ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
-//THUMB_FN(0xfe0c93f5, RegisterEDmacPopCBR                ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
-//THUMB_FN(0xfe0c940d, UnregisterEDmacPopCBR              ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+/**
+ * EDMAC cluster — all addresses confirmed by disassembly of ROM1.BIN 1.0.3
+ *
+ * SIGNATURE NOTES for wrappers in function_overrides.c:
+ *
+ * StartEDmac:
+ *   Canon fn @ 0xfe338136: takes (channel) only; clears state table[ch], RMW mmio+4
+ *   to set bit 29, DSB barrier, then writes 1 to mmio+0 via shadow-write.
+ *   ML API:   StartEDmac(channel, flags) — extra `flags` arg ignored in wrapper.
+ *
+ * SetEDmac:
+ *   Canon fn @ 0xfe3382f2: takes (channel, &edmac_info); validates state, processes
+ *   11 fields from edmac_info (offsets 0x00–0x28) with masking, bulk-writes to mmio+0xc.
+ *   Canon fn @ 0xfe338236: variant with read-first (reads current MMIO state first).
+ *   ML API:   SetEDmac(channel, addr, &edmac_info, flags) — addr and flags ignored;
+ *   the address is set separately by ConnectWriteEDmac on DIGIC 6.  Wrapper calls
+ *   Canon's fn with (channel, &edmac_info) only.
+ *
+ * ConnectWriteEDmac:
+ *   Canon fn @ 0xfe33820c: takes (channel, buf_addr); strips top 2 bits of buf_addr
+ *   (bic r1, r5, #0xc0000000), writes result to mmio+8 via shadow-write.  COMPATIBLE
+ *   with ML's API: `where` in ConnectWriteEDmac(channel, where) IS the DMA buffer
+ *   address on DIGIC 6 (not a connection ID).  No wrapper needed.
+ *
+ * AbortEDmac:
+ *   Canon fn @ 0xfe338176: takes (channel); sets state[ch]=1, RMW(mmio+4, ~7, 6)
+ *   to write abort pattern (bits 1|2) to control register.  ML API matches (1 arg).
+ *
+ * RegisterEDmacCompleteCBR:
+ *   Write path to 0x424b8 / 0x42578 callback tables NOT found in ROM scan.
+ *   fn @ 0xfe338196 writes r1 to 0x424b8+ch×4 AND to mmio+4 bits 0-2 — may be
+ *   a mode-setting or abort-CBR function, NOT RegisterEDmacCompleteCBR.
+ *   Keep as no-op until confirmed on hardware.  Without this, mlv_lite will not
+ *   receive DMA-complete notifications and frames will not be processed.
+ */
+
+/** FALSE POSITIVES from FindEDMAC_D6.py Phase 2 — kept for historical reference **/
+//THUMB_FN(0xfe0af2f7, SetEDmac                           ) // [FALSE_POSITIVE]  timing/counter fn
+//THUMB_FN(0xfe0b2221, ConnectWriteEDmac                  ) // [FALSE_POSITIVE]  state-machine/event fn
+//THUMB_FN(0xfe0bcaf3, ConnectReadEDmac                   ) // [FALSE_POSITIVE]  polling/status fn
+//THUMB_FN(0xfe0bdff9, StartEDmac                         ) // [FALSE_POSITIVE]  complex state machine
+//THUMB_FN(0xfe0c3033, AbortEDmac                         ) // [FALSE_POSITIVE]  unconfirmed cluster
+//THUMB_FN(0xfe0c8937, RegisterEDmacCompleteCBR           ) // [FALSE_POSITIVE]  event-dispatch wrapper (ldrb.w [r0,#0x10d])
+//THUMB_FN(0xfe0c8c8f, UnregisterEDmacCompleteCBR         ) // [FALSE_POSITIVE]  event-dispatch wrapper
+//THUMB_FN(0xfe0c93c5, RegisterEDmacAbortCBR              ) // [FALSE_POSITIVE]  event-dispatch wrapper
+//THUMB_FN(0xfe0c93dd, UnregisterEDmacAbortCBR            ) // [FALSE_POSITIVE]  event-dispatch wrapper
+//THUMB_FN(0xfe0c93f5, RegisterEDmacPopCBR                ) // [FALSE_POSITIVE]  event-dispatch wrapper
+//THUMB_FN(0xfe0c940d, UnregisterEDmacPopCBR              ) // [FALSE_POSITIVE]  event-dispatch wrapper
+
+/** EDMAC cluster — POSSIBLE candidates from Capstone analysis of ROM1.BIN **/
+/** Enable after hardware confirmation. Wrappers in function_overrides.c handle sig mismatches. **/
+//THUMB_FN(0xfe338136, StartEDmac                         ) // [POSSIBLE] 1-arg wrapper; cmp r0,#0x19; push; writes 1→mmio+0 with DSB
+//THUMB_FN(0xfe338176, AbortEDmac                         ) // [POSSIBLE] 1-arg; state[ch]=1; RMW(mmio+4,~7,6) — abort bits
+//THUMB_FN(0xfe33820c, ConnectWriteEDmac                  ) // [POSSIBLE] (ch,buf); bic #0xc0000000; writes to mmio+8
+//THUMB_FN(0xfe3382f2, SetEDmac                           ) // [POSSIBLE] (ch,&info); 11-field bulk write to mmio+0xc — needs 4→2 arg wrapper
+//THUMB_FN(0xfe338236, SetEDmac                           ) // [POSSIBLE] variant: read-first before write (use 0xfe3382f2 as primary)
+
+/** fn@0xfe338196: stores r1 to 0x424b8+ch×4 AND writes r1 to mmio+4 bits 0–2.
+ *  Possible RegisterEDmacAbortCBR or channel-mode setter — NOT RegisterEDmacCompleteCBR.
+ *  //THUMB_FN(0xfe338196, ???) **/
 
 /** Shared memory / MMIO helpers **/
 // Adjacent 2-instruction pair found by capstone scan of real ROM1.BIN (fw 1.0.2).
@@ -247,7 +325,27 @@ THUMB_FN(0xfe15aec5, shamem_read                        ) // [HIGH]   verified: 
 //THUMB_FN(0xfe26c459, _EngDrvOut                         ) // [WRONG]  FindEDMAC_D6 Phase 4 off-by-one — garbage disassembly
 
 /** Resource lock **/
-// CreateResLockEntry @ 0xfe985dc5 was WRONG — disassembles as data, not code.
-// String 'EngDeleteResLockEntry' found near 0xfe980291; real CreateResLockEntry
-// is likely in the same cluster but not yet located. Keeping as no-op for now.
-//THUMB_FN(0xfe985dc5, CreateResLockEntry                 ) // [WRONG]  Phase 5 false positive — address is data region
+// CreateResLockEntry near 0xFE980000 — two candidates identified 2026-02-18:
+//
+// fn @ 0xFE98004D (~60B, small wrapper):
+//   push {r4, r5, lr}
+//   Loads global table ptr from [pc] → 0xfe980154 = 0x01AC2394
+//   Lazily inits resource-lock slots [r4] and [r4+8]
+//   Tail-calls 0xFE9BA84C (ARM32 entry: starts with 'bx pc' → mode switch to ARM)
+//   Likely a thin wrapper over the real allocator.
+//
+// fn @ 0xFE98008F (~218B, 4-arg, PREFERRED CANDIDATE):
+//   push.w {r4, r5, r6, r7, r8, sb, sl, lr}
+//   sub sp, #0xb8 (184-byte stack frame)
+//   Takes 4+ arguments (matching Canon's internal CreateResLockEntry signature)
+//   Contains assert handler call → 'RscLckEntry1st != NULL' asserts nearby
+//   Strong match for CreateResLockEntry by size/arg-count/surrounding strings.
+//
+// 5D4.133 CreateResLockEntry @ 0xFE9FD4A8 disassembles mid-function in 80D ROM
+// → code layout differs between 5D4 and 80D; can't cross-port address directly.
+//
+// TODO: boot with ml debug menu → "Dump ROM and RAM" → run find_edmac_table.py to confirm.
+//
+//THUMB_FN(0xfe98004d, CreateResLockEntry                 ) // [POSSIBLE] thin wrapper (tail-calls ARM32 allocator)
+//THUMB_FN(0xfe98008f, CreateResLockEntry                 ) // [POSSIBLE] 4-arg 218B fn — preferred candidate
+//THUMB_FN(0xfe985dc5, CreateResLockEntry                 ) // [FALSE_POSITIVE]  data region, not code

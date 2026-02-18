@@ -109,61 +109,137 @@ int get_task_info_by_id(int unknown_flag, int task_id, void *task_attr)
     return _get_task_info_by_id(task->taskId, task_attr);
 }
 
-/** WRONG: temporary overrides to get CONFIG_HELLO_WORLD working **/
+/*
+ * EDMAC function overrides — DIGIC 6 (80D 1.0.3)
+ *
+ * Canon's EDMAC API has a different signature from ML's EDMAC API.
+ * These wrappers bridge the gap.  The Canon function addresses are from
+ * ROM1.BIN analysis (research/reference/80d-candidate-stubs.S).
+ *
+ * Canon EDMAC function cluster @ 0xfe338136–0xfe3384ca.
+ * Shared memory helpers:
+ *   fn@0xfe420caa = shadowed write(addr, value)
+ *   fn@0xfe420cd8 = shadow read(addr)
+ *   fn@0xfe420ce4 = locked RMW(addr, AND_mask, OR_value)
+ *
+ * TODO (after ROM1.BIN dump confirms addresses on hardware):
+ *   1. Remove the [POSSIBLE] comments from stubs.S for confirmed fns.
+ *   2. Wire ConnectWriteEDmac directly via THUMB_FN (no wrapper needed).
+ *   3. Wire AbortEDmac directly via THUMB_FN (sig matches).
+ *   4. Find RegisterEDmacCompleteCBR write path (currently no-op).
+ */
+
+/* Canon's SetEDmac(channel, &info) — no address or flags argument.
+ * ML calls SetEDmac(channel, address, &info, flags).
+ * On DIGIC 6, the DMA buffer address is set separately by ConnectWriteEDmac.
+ * We ignore 'address' and 'flags' and forward (channel, ptr) to Canon.
+ *
+ * Canon fn @ 0xfe3382f2 (Thumb+1 = 0xfe3382f3):
+ *   push {r4,r5,lr}; sub sp,#0x24
+ *   r0=channel, r1=&edmac_info → validates state, processes 11 fields, bulk-writes to mmio+0xc
+ */
+static void (* const _canon_SetEDmac)(unsigned int ch, struct edmac_info *ptr)
+    = (void *)(0xfe3382f2 | 1);   /* Thumb bit set */
 
 void SetEDmac(unsigned int channel, void *address, struct edmac_info *ptr, int flags)
 {
-    return;
+    (void)address;   /* handled by ConnectWriteEDmac on DIGIC 6 */
+    (void)flags;     /* encoded in edmac_info fields */
+    _canon_SetEDmac(channel, ptr);
 }
+
+/* Canon's ConnectWriteEDmac(channel, buf_addr) — COMPATIBLE with ML's API.
+ * ML's 'where' parameter IS the DMA buffer address on DIGIC 6.
+ * Canon strips top 2 bits (bic #0xc0000000) and writes to mmio+8.
+ *
+ * Canon fn @ 0xfe33820c (Thumb+1 = 0xfe33820d):
+ *   push {r4,r5,r6,lr}; checks state; bic r1,r5,#0xc0000000; writes to mmio+8
+ *
+ * TODO: enable THUMB_FN in stubs.S and remove this wrapper after hardware confirm.
+ */
+static void (* const _canon_ConnectWriteEDmac)(unsigned int ch, unsigned int buf_addr)
+    = (void *)(0xfe33820c | 1);
 
 void ConnectWriteEDmac(unsigned int channel, unsigned int where)
 {
-    return;
+    _canon_ConnectWriteEDmac(channel, where);
 }
 
+/* ConnectReadEDmac — Canon equivalent not yet confirmed in ROM scan.
+ * Read channels (DRAM→camera) are used for playback, not MLV recording.
+ * Safe no-op for mlv_lite recording use case.
+ */
 void ConnectReadEDmac(unsigned int channel, unsigned int where)
 {
-    return;
+    (void)channel; (void)where;
 }
+
+/* Canon's StartEDmac(channel) — one argument only.
+ * ML calls StartEDmac(channel, flags); 'flags' is ignored.
+ * Canon fn @ 0xfe338136 (Thumb+1 = 0xfe338137):
+ *   cmp r0,#0x19; push {r4,lr}; range checks; RMW(mmio+4,~0x20000000,0x20000000);
+ *   dsb sy; writes 1→mmio+0 (starts DMA).
+ */
+static void (* const _canon_StartEDmac)(unsigned int ch)
+    = (void *)(0xfe338136 | 1);
 
 void StartEDmac(unsigned int channel, int flags)
 {
-    return;
+    (void)flags;
+    _canon_StartEDmac(channel);
 }
+
+/* Canon's AbortEDmac(channel) — one argument, matches ML's API.
+ * Canon fn @ 0xfe338176 (Thumb+1 = 0xfe338177):
+ *   ldr r2,state_table; movs r1,#1; str.w r1,[r2,r0,lsl#2]; (state[ch]=1)
+ *   RMW(mmio+4, ~7, 6) — sets abort bits 1|2 in control register.
+ *
+ * TODO: enable THUMB_FN in stubs.S and remove this wrapper after hardware confirm.
+ */
+static void (* const _canon_AbortEDmac)(unsigned int ch)
+    = (void *)(0xfe338176 | 1);
 
 void AbortEDmac(unsigned int channel)
 {
-    return;
+    _canon_AbortEDmac(channel);
 }
 
+/* RegisterEDmacCompleteCBR — write path to Canon's callback table not yet found.
+ * The completion ISR (fn@0xfe338d09 for ch 0–24) reads from 0x424b8+ch×4
+ * and 0x42578+ch×12.  The function that WRITES those entries was not identified
+ * in the ROM scan (no LDR resolving to those addresses exists in the Edmac module).
+ * Without this working, mlv_lite will start DMA but never receive frame-done
+ * notifications — recording will stall.
+ * TODO: find the write path via hardware ROM dump + dynamic trace.
+ */
 void RegisterEDmacCompleteCBR(int channel, void (*cbr)(void*), void* cbr_ctx)
 {
-    return;
+    (void)channel; (void)cbr; (void)cbr_ctx;
 }
 
 void UnregisterEDmacCompleteCBR(int channel)
 {
-    return;
+    (void)channel;
 }
 
 void RegisterEDmacAbortCBR(int channel, void (*cbr)(void*), void* cbr_ctx)
 {
-    return;
+    (void)channel; (void)cbr; (void)cbr_ctx;
 }
 
 void UnregisterEDmacAbortCBR(int channel)
 {
-    return;
+    (void)channel;
 }
 
 void RegisterEDmacPopCBR(int channel, void (*cbr)(void*), void* cbr_ctx)
 {
-    return;
+    (void)channel; (void)cbr; (void)cbr_ctx;
 }
 
 void UnregisterEDmacPopCBR(int channel)
 {
-    return;
+    (void)channel;
 }
 
 // _EngDrvOut and shamem_read are now resolved via stubs.S:
