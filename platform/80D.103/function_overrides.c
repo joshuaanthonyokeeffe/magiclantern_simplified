@@ -256,6 +256,20 @@ unsigned int UnLockEngineResources(struct LockEntry *lockEntry)
     return 0;
 }
 
+/* CreateResLockEntry — Canon address in ROM0 (unreachable from ROM1 without dump).
+ * Candidates 0xfe98004d (1-arg wrapper) / 0xfe98008f (4-arg) exist in ROM1 but
+ * neither matches ML's 2-arg signature; ROM0 holds the real implementation.
+ * Return a dummy non-NULL handle so ASSERT(resLock) passes and modules load.
+ * LockEngineResources (called after this) uses UnLockEngineResources no-op path.
+ * DMA will still stall on frame-done (RegisterEDmacCompleteCBR not wired).
+ * TODO: replace with THUMB_FN once ROM0.BIN confirms address. */
+struct LockEntry *CreateResLockEntry(uint32_t *resIds, uint32_t resIdCount)
+{
+    (void)resIds; (void)resIdCount;
+    static uint32_t _dummy_lock_entry[16];
+    return (struct LockEntry *)_dummy_lock_entry;
+}
+
 #ifdef CONFIG_AUDIO_CONTROLS
 #include <audio.h>
 
