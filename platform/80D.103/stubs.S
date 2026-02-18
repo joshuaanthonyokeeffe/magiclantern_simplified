@@ -202,3 +202,41 @@ THUMB_FN(0xfe32f154,  PlayMovieGuideApp_handler)            // msg: "StartPlayMo
 DATA_PTR(    0xe4a0,  LiveViewApp_dialog)                   // in StartLiveViewApp()
 //DATA_PTR( 0x11b88,  LiveViewShutterApp_dialog)            // in StartLiveViewShutterApp(), not sure if needed
 //DATA_PTR(  0xf1e4,  PlayMovieGuideApp_dialog)             // in StartPlayMovieGuideApp()
+
+/**
+ * EDMAC — Engine DMA Controller
+ *
+ * Addresses found by FindEDMAC_D6.py against ROM1.BIN dumped from firmware 1.0.2.
+ * ROM-space addresses are expected to be stable between 1.0.2 and 1.0.3;
+ * verify in Ghidra and re-run against a 1.0.3 dump when available.
+ *
+ * DIGIC 6 EDMAC base: 0xD0000000, stride 0x200/channel.
+ * RAW_LV_EDMAC_CHANNEL_ADDR = 0xD0004200 (ch33, EDMAC_WRITE_14) — from consts.h.
+ * shamem_read(RAW_LV_EDMAC_CHANNEL_ADDR + 0x08) returns the DRAM buffer pointer.
+ *
+ * Confidence ratings from FindEDMAC_D6.py:
+ *   HIGH   = string-proximity confirmed, safe to use
+ *   MEDIUM = pattern + MMIO literal match, verify in Ghidra
+ *   LOW    = cluster detected, ordering unconfirmed — verify before enabling
+ */
+
+/** EDMAC cluster — SetEDmac / Connect* / StartEDmac / Abort* / CBR registration **/
+/** All detected in tight cluster 0xFE0Axxxx-0xFE0Cxxxx; ordering needs Ghidra confirmation **/
+//THUMB_FN(0xfe0af2f7, SetEDmac                           ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+//THUMB_FN(0xfe0b2221, ConnectWriteEDmac                  ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+//THUMB_FN(0xfe0bcaf3, ConnectReadEDmac                   ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+//THUMB_FN(0xfe0bdff9, StartEDmac                         ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+//THUMB_FN(0xfe0c3033, AbortEDmac                         ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+//THUMB_FN(0xfe0c8937, RegisterEDmacCompleteCBR           ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+//THUMB_FN(0xfe0c8c8f, UnregisterEDmacCompleteCBR         ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+//THUMB_FN(0xfe0c93c5, RegisterEDmacAbortCBR              ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+//THUMB_FN(0xfe0c93dd, UnregisterEDmacAbortCBR            ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+//THUMB_FN(0xfe0c93f5, RegisterEDmacPopCBR                ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+//THUMB_FN(0xfe0c940d, UnregisterEDmacPopCBR              ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
+
+/** Shared memory / MMIO helpers **/
+//THUMB_FN(0xfe6e40d3, shamem_read                        ) // [LOW]    FindEDMAC_D6 Phase 3; tiny fn near 0xFE6BC424 (7D2 ref)
+//THUMB_FN(0xfe26c459, _EngDrvOut                         ) // [MEDIUM] FindEDMAC_D6 Phase 4; tiny-write fn near mpu_send
+
+/** Resource lock **/
+THUMB_FN(0xfe985dc5, CreateResLockEntry                 ) // [HIGH]   FindEDMAC_D6 Phase 5; string 'CreateResLockEntry' confirmed
