@@ -235,8 +235,19 @@ DATA_PTR(    0xe4a0,  LiveViewApp_dialog)                   // in StartLiveViewA
 //THUMB_FN(0xfe0c940d, UnregisterEDmacPopCBR              ) // [LOW]    FindEDMAC_D6 Phase 2; verify cluster order
 
 /** Shared memory / MMIO helpers **/
-//THUMB_FN(0xfe6e40d3, shamem_read                        ) // [LOW]    FindEDMAC_D6 Phase 3; tiny fn near 0xFE6BC424 (7D2 ref)
-//THUMB_FN(0xfe26c459, _EngDrvOut                         ) // [MEDIUM] FindEDMAC_D6 Phase 4; tiny-write fn near mpu_send
+// Adjacent 2-instruction pair found by capstone scan of real ROM1.BIN (fw 1.0.2).
+// _EngDrvOut: str r1, [r0]; bx lr  — writes r1 (value) to r0 (reg addr)
+// shamem_read: ldr r0, [r0]; bx lr — dereferences r0, returns u32
+// Canon groups these paired MMIO utilities adjacently; HIGH confidence.
+THUMB_FN(0xfe15aec1, _EngDrvOut                         ) // [HIGH]   verified: str r1,[r0]; bx lr — 2-insn MMIO write
+THUMB_FN(0xfe15aec5, shamem_read                        ) // [HIGH]   verified: ldr r0,[r0]; bx lr — 2-insn MMIO read, adjacent to EngDrvOut
+
+// Superseded candidates (wrong addresses — kept for reference):
+//THUMB_FN(0xfe6e40d3, shamem_read                        ) // [WRONG]  FindEDMAC_D6 Phase 3 false positive — 40-insn fn, not tiny
+//THUMB_FN(0xfe26c459, _EngDrvOut                         ) // [WRONG]  FindEDMAC_D6 Phase 4 off-by-one — garbage disassembly
 
 /** Resource lock **/
-THUMB_FN(0xfe985dc5, CreateResLockEntry                 ) // [HIGH]   FindEDMAC_D6 Phase 5; string 'CreateResLockEntry' confirmed
+// CreateResLockEntry @ 0xfe985dc5 was WRONG — disassembles as data, not code.
+// String 'EngDeleteResLockEntry' found near 0xfe980291; real CreateResLockEntry
+// is likely in the same cluster but not yet located. Keeping as no-op for now.
+//THUMB_FN(0xfe985dc5, CreateResLockEntry                 ) // [WRONG]  Phase 5 false positive — address is data region

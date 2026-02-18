@@ -166,15 +166,9 @@ void UnregisterEDmacPopCBR(int channel)
     return;
 }
 
-void _EngDrvOut(uint32_t reg, uint32_t value)
-{
-    return;
-}
-
-uint32_t shamem_read(uint32_t addr)
-{
-    return 0;
-}
+// _EngDrvOut and shamem_read are now resolved via stubs.S:
+//   _EngDrvOut  @ 0xfe15aec1  (str r1,[r0]; bx lr)
+//   shamem_read @ 0xfe15aec5  (ldr r0,[r0]; bx lr)
 
 void _engio_write(uint32_t* reg_list)
 {
@@ -183,5 +177,142 @@ void _engio_write(uint32_t* reg_list)
 
 unsigned int UnLockEngineResources(struct LockEntry *lockEntry)
 {
+    return 0;
+}
+
+#ifdef CONFIG_AUDIO_CONTROLS
+#include <audio.h>
+
+/* Audio IC stubs - safe no-ops until ROM1.BIN provides _audio_ic_read/_write addresses.
+ * The AK4646 I2C command addresses are unknown on 80D DIGIC 6.
+ * These allow CONFIG_AUDIO_CONTROLS to compile without crashing at runtime. */
+
+void _audio_ic_write(unsigned cmd)
+{
+    (void)cmd;
+}
+
+void _audio_ic_read(unsigned cmd, unsigned *result)
+{
+    (void)cmd;
+    if (result) *result = 0;
+}
+
+/* Canon sounddev_task: ML replaces it via TASK_OVERRIDE; this noop satisfies the linker.
+ * The TASK_OVERRIDE won't match any real Canon task (addresses differ), so it silently
+ * skips - Canon's own audio task continues to run unmodified. */
+void sounddev_task(void) { }
+
+/* sounddev_active_in: Canon function to start audio input DMA. Noop until stubbed. */
+void sounddev_active_in(void (*unlock_func)(void *), void *arg)
+{
+    (void)unlock_func;
+    (void)arg;
+}
+
+/* sounddev: Canon global sound device struct. Static zero buffer - sem writes are safe. */
+struct sounddev sounddev;
+
+#endif /* CONFIG_AUDIO_CONTROLS */
+
+/* WiFi socket stubs - error-returning placeholders until ROM1.BIN provides addresses.
+ * These allow yolo.mo to link against the 80D sym file and load on physical hardware.
+ * The NwLime/wlan eventproc chain runs fully via call() at 0xfe48422e; wlan_connect
+ * returns -1 (stub) so yolo_init exits after that chain with a logged error - giving
+ * useful diagnostics on first boot. Replace with THUMB_FN stubs from ROM1.BIN to
+ * activate. Also find the 80D Lime core init poll addr (200D uses 0x1d90c).
+ * ROM1.BIN search targets: "socket", "wlan", "NwLime", "LimeDebugMsg". */
+#include "ml_socket.h"
+
+int socket_create(int domain, int type, int protocol)
+{
+    (void)domain; (void)type; (void)protocol;
+    return -1; /* needs ROM1.BIN */
+}
+
+int socket_bind(int socket, struct sockaddr_in *addr, int addr_len)
+{
+    (void)socket; (void)addr; (void)addr_len;
+    return -1;
+}
+
+int socket_connect(int socket, struct sockaddr_in *addr, int addr_len)
+{
+    (void)socket; (void)addr; (void)addr_len;
+    return -1;
+}
+
+int socket_listen(int socket, int backlog)
+{
+    (void)socket; (void)backlog;
+    return -1;
+}
+
+int socket_accept(int socket, void *addr, int addr_len)
+{
+    (void)socket; (void)addr; (void)addr_len;
+    return -1;
+}
+
+int socket_recv(int socket, void *buf, int len, int flags)
+{
+    (void)socket; (void)buf; (void)len; (void)flags;
+    return 0;
+}
+
+int socket_send(int socket, void *buf, int len, int flags)
+{
+    (void)socket; (void)buf; (void)len; (void)flags;
+    return 0;
+}
+
+void socket_setsockopt(int socket, int level, int option_name,
+                       const void *option_value, int option_len)
+{
+    (void)socket; (void)level; (void)option_name;
+    (void)option_value; (void)option_len;
+}
+
+int socket_getsockopt(int socket, int level, int option_name,
+                      void *option_value, int option_len)
+{
+    (void)socket; (void)level; (void)option_name;
+    (void)option_value; (void)option_len;
+    return -1;
+}
+
+int socket_shutdown(int socket, int flag)
+{
+    (void)socket; (void)flag;
+    return 0;
+}
+
+int socket_close_caller(int converted_socket)
+{
+    (void)converted_socket;
+    return 0;
+}
+
+int socket_convertfd(int socket)
+{
+    return socket; /* passthrough - no fd translation with stub sockets */
+}
+
+int wlan_connect(struct wlan_settings *settings)
+{
+    (void)settings;
+    return -1; /* needs ROM1.BIN - triggers "error from wlan_connect: -1" in yolo_init */
+}
+
+int nif_setup(int interface)
+{
+    (void)interface;
+    return 0;
+}
+
+int set_IP_address(int interface, uint32_t client_IP,
+                   uint32_t subnet_mask, uint32_t gateway_IP)
+{
+    (void)interface; (void)client_IP; (void)subnet_mask; (void)gateway_IP;
     return 0;
 }
