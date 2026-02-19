@@ -79,6 +79,15 @@ void platform_post_init()
     // it will behave as "stock" MagicLantern code.
     pMemoryMgr = MMGR_DEFAULT_POOL;
 
+#ifdef CONFIG_ROM_DUMP
+    /* ROM dump: dumps decrypted Canon firmware from DRAM to ML/LOGS/ROM_E0000000.BIN
+     * Build: make CFLAGS_PLATFORM+=" -DCONFIG_ROM_DUMP"   (in platform/R.180 dir)
+     * Use output with: python3 research/tools/FindEDMAC_D8.py ROM_E0000000.BIN
+     */
+    extern void rom_dump_init(void);
+    rom_dump_init();
+#endif
+
     // Disable for now, region is uncached - causes perf problems in LV
     return;
     uint32_t MMGR_REGION_SIZE = (uint32_t)&MMGR_REGION_END - (uint32_t)&MMGR_REGION_START + 1;

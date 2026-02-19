@@ -406,3 +406,74 @@ int set_IP_address(int interface, uint32_t client_IP,
     (void)interface; (void)client_IP; (void)subnet_mask; (void)gateway_IP;
     return 0;
 }
+
+#ifdef CONFIG_PLATFORM_POST_INIT
+/* Pre-initialize RGBA VRAM for QEMU.
+ *
+ * Canon's GIS compositor / GuiMainTask never populates _rgb_vram_info in
+ * emulation (display hardware not connected), so boot_post_init_task blocks
+ * forever on:
+ *
+ *   while (!rgb_vram_preinit()) msleep(100);   <- reads _rgb_vram_info
+ *   while (!bmp_vram_raw())     msleep(100);   <- reads rgb_vram_info->bitmap_data
+ *
+ * Seeding _rgb_vram_info with a fake MARV struct here (called before those
+ * loops) lets both loops pass immediately so ml_init can be scheduled.
+ *
+ * The RGBA buffer is allocated via Canon's raw heap: _AllocateMemory() at
+ * ATCM:0x4D6.  This is called BEFORE ML's mem_sem semaphore is created
+ * (_mem_init() runs later in my_big_init_task), so we must NOT use ML's
+ * malloc() wrapper (__mem_malloc) — it asserts on mem_sem == NULL.
+ * _AllocateMemory() returns cached-DRAM addresses (0x0xxxxxxx) that
+ * QEMU-EOS maps as normal writable RAM — safe for the 2 MB RGBA frame.
+ *
+ * We deliberately avoid _alloc_dma_memory (BTCM:0x800062b8): it returns
+ * uncached/DMA addresses (0x4xxxxxxx) that QEMU-EOS does not map as writable
+ * RAM, causing a QEMU process crash when refresh_yuv_from_rgb writes the
+ * full 960×540×4 RGBA frame.
+ *
+ * We also avoid a file-scope static uint8_t[960*540*4]: that puts 2 MB in BSS
+ * (0x207d40–0x40f100), and zero_bss() in copy_and_restart() zeroing 2 MB at
+ * startup takes minutes in QEMU (cache disabled, every word hits DRAM).
+ */
+extern void *_AllocateMemory(size_t size);  /* Canon DryOS heap (ATCM:0x4D6) */
+
+static struct MARV fake_marv;   /* ~32 bytes in BSS, zero-initialised */
+
+void platform_post_init(void)
+{
+    uint8_t *buf = (uint8_t *)_AllocateMemory(960 * 540 * 4);
+    if (!buf) {
+        uart_printf("[QEMU] platform_post_init: _AllocateMemory(%u) failed\n",
+                    960 * 540 * 4);
+        return;
+    }
+
+    fake_marv.signature    = 0x5652414D;  /* 'MARV' */
+    fake_marv.bitmap_data  = buf;
+    fake_marv.opacity_data = NULL;
+    fake_marv.flags        = 0x5040100;   /* XIMR_FLAGS_LAYER_RGBA */
+    fake_marv.width        = 960;
+    fake_marv.height       = 540;
+    fake_marv.pmem         = NULL;
+
+    uart_printf("[QEMU] platform_post_init: buf=%p marv=%p\n",
+                buf, &fake_marv);
+    _rgb_vram_info = &fake_marv;
+}
+#endif /* CONFIG_PLATFORM_POST_INIT */
+
+/* Override XimrExe with a no-op for QEMU.
+ *
+ * Canon's XimrExe (XIMR render-mixer) tries to composite the RGBA overlay
+ * into the display via XIMR hardware DMA, which is not emulated in QEMU-EOS.
+ * Calling the real ROM function at 0xfe22b2fc crashes redraw_task.
+ *
+ * The stub in stubs.S is commented out so the linker resolves to this function.
+ * Return 0 (success) so bmp.c continues without errors.
+ */
+int XimrExe(void *ximr_context)
+{
+    (void)ximr_context;
+    return 0;
+}

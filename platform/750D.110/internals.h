@@ -18,3 +18,8 @@
 
 #define CONFIG_TASK_STRUCT_V2
 #define CONFIG_TASK_ATTR_STRUCT_V3
+
+/* Quick win: added by PRISM research */
+#define CONFIG_DISPLAY_FILTERS
+
+/* CONFIG_AUDIO_CONTROLS: disabled — 750D needs _audio_ic_read/_audio_ic_write/sounddev stubs (differ from 80D) */

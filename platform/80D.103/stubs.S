@@ -177,7 +177,8 @@ THUMB_FN(0xfe37128a, SetCFnData)                            // "SetCFnData"
  */
 
 /** General FEATURE_VRAM_RGBA stubs **/
-THUMB_FN(0xfe22b2fc, XimrExe);                              //In RefreshVrmsSurface, just before "XimrExe" debug message
+// XimrExe overridden in function_overrides.c (QEMU: XIMR HW not emulated, Canon stub crashes)
+//THUMB_FN(0xfe22b2fc, XimrExe);                              //In RefreshVrmsSurface, just before "XimrExe" debug message
 DATA_PTR(    0xc28c, _rgb_vram_info);
 DATA_PTR(    0xc288, winsys_sem);                           // Used in RefreshVrmsSurface around XimrExe call
 

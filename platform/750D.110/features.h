@@ -34,3 +34,6 @@
 
 // explicitly disable stuff that don't work or may break things
 #undef CONFIG_AUTOBACKUP_ROM
+
+/* Quick win: focus stacking */
+#define FEATURE_FOCUS_STACKING

@@ -30,7 +30,7 @@
 
 // We can't yet rely on image capture.  Cam crashes due to null pointer,
 // I think?  If it fails to AF lock, for example.
-#define CONFIG_IMAGE_CAPTURE_NOT_WORKING
+// #define CONFIG_IMAGE_CAPTURE_NOT_WORKING  /* focus stacking: AF_DONT_CHANGE path is safe; lens_focus is property-based */
 
 #define FEATURE_PICSTYLE
 #define CONFIG_PROP_REQUEST_CHANGE
@@ -39,3 +39,10 @@
 #undef CONFIG_STATE_OBJECT_HOOKS
 #undef CONFIG_CRASH_LOG
 #undef CONFIG_AUTOBACKUP_ROM
+
+// Focus stacking — enabled because:
+// - CONFIG_PROP_REQUEST_CHANGE is defined (lens_focus uses prop_request_change_wait)
+// - capture chain uses call("Release") @ 0xfe48422e (already stubbed)
+// - AF_DONT_CHANGE path skips lens_setup_af → no null pointer crash
+// - lens_focus is entirely property-based (PROP_LV_LENS_DRIVE_REMOTE)
+#define FEATURE_FOCUS_STACKING

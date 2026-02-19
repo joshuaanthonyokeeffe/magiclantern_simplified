@@ -532,6 +532,7 @@ static void my_big_init_task()
     uart_printf("hello from ML, after late tasks");
 #endif
 
+    DryosDebugMsg(0, 15, "ML fully started: %d tasks created", ml_tasks);
     ml_started = 1;
 }
 

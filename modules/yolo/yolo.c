@@ -338,9 +338,14 @@ unsigned int yolo_init()
     uart_printf(" ==== yolo: init start\n");
     msleep(2000); // wait for the Lime core to init?  Maybe not required
 
-    // we hard-code some stuff for 200D, stop all other cams
-    // proceeding:
-    if (!is_camera("200D", "1.0.1"))
+    // 200D: all 18 socket/wlan/nif stubs present, fully functional.
+    // 80D:  socket stubs are error-returning no-ops (see function_overrides.c).
+    //       The NwLime*/wlan* eventproc chain runs fully via call() @ 0xfe48422e.
+    //       wlan_connect() returns -1 (stub) so init fails after the eventproc
+    //       chain — diagnostically useful on first physical boot.
+    //       Replace socket stubs with THUMB_FN entries from ROM1.BIN to activate.
+    //       The 200D Lime core poll (MEM(0x1d90c)) is not reached on 80D.
+    if (!is_camera("200D", "1.0.1") && !is_camera("80D", "1.0.3"))
         return -1;
     
     static struct network_config config = {0};

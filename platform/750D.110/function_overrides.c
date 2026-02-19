@@ -187,3 +187,12 @@ unsigned int UnLockEngineResources(struct LockEntry *lockEntry)
 {
     return 0;
 }
+
+/* Quick win: CONFIG_AUDIO_CONTROLS safe no-ops (PRISM research) */
+#ifdef CONFIG_AUDIO_CONTROLS
+void SetSamplingRate(int rate, int channels)    { return; }
+void SetAudioVolumeOut(int vol)                 { return; }
+int  SetAudioVolumeIn(int vol)                  { return 0; }
+void SetAudioInputSource(int src, int mode)     { return; }
+void SetGain(int gain)                          { return; }
+#endif

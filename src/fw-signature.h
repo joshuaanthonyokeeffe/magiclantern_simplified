@@ -37,7 +37,8 @@
 #define SIG_7D2_112  0xe7b1a44b // from FE0A0000
 #define SIG_7D_MASTER_203 0x640BF4D1 // from FF010000
 //#define SIG_80D_102  0x74d93d11 // from FE0A0000
-#define SIG_80D_103  0x98ec1433 // from FE0A0000
+// QEMU: real 1.0.3 ROM + 5 patches (startupPrepareCapture/startupPrepareDevelop/assert)
+#define SIG_80D_103  0xf72f134b // QEMU patched 1.0.3 ROM; 0x98ec1433 is real unpatched 1.0.3
 #define SIG_850D_100 0xad55d877 // from e0040000
 #define SIG_EOSM_202 0x2D7c6dcf // from FF0C0000
 //#define SIG_M50_102  0x3b70901c // from E0040000

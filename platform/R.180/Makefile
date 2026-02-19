@@ -20,6 +20,8 @@ PLATFORM_ARCH = armv7-a
 
 ML_BOOT_OBJ = boot-d678.o
 ML_SRC_EXTRA_OBJS += $(BUILD_DIR)/function_overrides.o $(BUILD_DIR)/test_features.o
+# ROM dump module (activated at runtime via CONFIG_ROM_DUMP in CFLAGS_PLATFORM)
+ML_SRC_EXTRA_OBJS += $(BUILD_DIR)/rom_dump.o
 
 include ../Makefile
 .DEFAULT_GOAL := $(BUILD_DIR)/cam_complete
