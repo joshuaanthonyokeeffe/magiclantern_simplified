@@ -345,8 +345,43 @@ THUMB_FN(0xfe15aec5, shamem_read                        ) // [HIGH]   verified: 
 // 5D4.133 CreateResLockEntry @ 0xFE9FD4A8 disassembles mid-function in 80D ROM
 // → code layout differs between 5D4 and 80D; can't cross-port address directly.
 //
-// TODO: boot with ml debug menu → "Dump ROM and RAM" → run find_edmac_table.py to confirm.
+// ROM analysis (2026-02-19) confirms these strings near 0xFC980000:
+//   0xFC980277: "m_hRscLckEntry1st != NULL"
+//   0xFC9802C7: "EngLockEngineResources( m_hRscLckEntry1st ) == SUCCESS"
+//   0xFC980379: "EngDeleteResLockEntry( m_hRscLckEntry1st ) == SUCCESS"
+// Multiple ResLockEntry types found: 1st, 2nd, ForEVF, Frq, Hd, Col, Fil, HsHd, Sim
+// All use EngLockEngineResources / EngDeleteResLockEntry calling convention.
+// Real CreateResLockEntry likely in veneer at 0xFE9BA84C → ARM32 allocator.
 //
 //THUMB_FN(0xfe98004d, CreateResLockEntry                 ) // [POSSIBLE] thin wrapper (tail-calls ARM32 allocator)
 //THUMB_FN(0xfe98008f, CreateResLockEntry                 ) // [POSSIBLE] 4-arg 218B fn — preferred candidate
 //THUMB_FN(0xfe985dc5, CreateResLockEntry                 ) // [FALSE_POSITIVE]  data region, not code
+
+/** CMOS / Sensor registers — found via ROM analysis 2026-02-19 **/
+// CMOS register names confirmed in firmware strings:
+//   CMOS_REG_R_GAIN9..12 (pCmosGain[0..3] asserts at 0xFC27367F-0xFC273749)
+//   CMOS_REG_R_INIT5..6 (pCmosMemSelect[0..1] asserts at 0xFC273CD3-0xFC273D22)
+//   LV_CMOS_H_SKIP_POINT_NUM (assert at 0xFC273CB7)
+//   CMOS DMA: "[REG] @@@@@@@@@@@@ Start CMOSDMA[%lx]size:%d" at 0xFC246311
+//   "[REG] ############ Start CMOS" at 0xFC245E01
+//   "[REG] CMOS:[0x%08x]" at 0xFC246226
+// RegisterSendCMOSGainCBR at 0xFC1D7FE0
+// No cmos_write/adtg_write stubs found — uses shadow-write helpers (0xfe420caa)
+// ADTG: only "SEQ_ADTG" string at 0xFCFFCDAF; no ADTG_WRITE candidate
+// SensorDrv string at 0xFCFFA9EE
+
+/** Lossless compression path — found via ROM analysis 2026-02-19 **/
+// Extensive lossless path in firmware:
+//   LosslessDecode.c at 0xFC0D8200
+//   LosslessDecode.c at 0xFC9FF6FE (EHD/LossLess/LosslessDecode.c)
+//   StartLosslessPath at 0xFC20C85D
+//   CompLosslessPath at 0xFC20C890
+//   CompLosslessPathResLockCB at 0xFC20BBF4
+//   LockEnginResLosslessPath at 0xFC20BC50
+//   LosslessPathRsc — params: SharememTbl, SharememNum, RdBayCh, WrRawCh, WrThumbCh
+//   LosslessPathParam — SizeInfo.Xa/Xb/Xn/Ya/Yb/Yn, ColorID, PreWin*, ChOff*, Orbit*
+//   ReqLosslessStart at 0xFC20B6DF
+//   CompAllocMemSuiteForLossless at 0xFC20BB48
+//   pfLosslessDecorderCBR asserts at 0xFC0A3698, 0xFC1D9046, 0xFC512AE2, 0xFC5C454A
+// This is Canon's hardware JPEG lossless encoder — used for .CR2 files.
+// ML's silent.mo could use this for lossless DNG compression if the API is wired.
