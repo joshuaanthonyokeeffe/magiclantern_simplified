@@ -408,6 +408,7 @@ int set_IP_address(int interface, uint32_t client_IP,
     return 0;
 }
 
+extern void *_AllocateMemory(size_t size);  /* Canon DryOS heap (ATCM:0x4D6) */
 static void edmac_builtin_test_task(void *unused);  /* forward decl */
 
 #ifdef CONFIG_RAW_LIVEVIEW
@@ -478,7 +479,18 @@ void qemu_start_vsync_sim(void)
 }
 #endif /* CONFIG_RAW_LIVEVIEW */
 
-#ifdef CONFIG_PLATFORM_POST_INIT
+#ifdef CONFIG_ROM_DUMP_ONLY
+/* ROM dump mode: skip ML init, just dump ROM and exit.
+ * Build with: make rom_dump */
+extern void rom_dump_task(void *unused);
+
+void platform_post_init(void)
+{
+    printf("[ROM_DUMP] platform_post_init — ROM dump mode\n");
+    task_create("rom_dump", 0x1f, 0x4000, rom_dump_task, 0);
+}
+
+#elif defined(CONFIG_PLATFORM_POST_INIT)
 /* Pre-initialize RGBA VRAM for QEMU.
  *
  * Canon's GIS compositor / GuiMainTask never populates _rgb_vram_info in
@@ -507,7 +519,6 @@ void qemu_start_vsync_sim(void)
  * (0x207d40–0x40f100), and zero_bss() in copy_and_restart() zeroing 2 MB at
  * startup takes minutes in QEMU (cache disabled, every word hits DRAM).
  */
-extern void *_AllocateMemory(size_t size);  /* Canon DryOS heap (ATCM:0x4D6) */
 
 static struct MARV fake_marv;   /* ~32 bytes in BSS, zero-initialised */
 
