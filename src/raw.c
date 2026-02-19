@@ -175,16 +175,20 @@ static volatile struct edmac_mmio *raw_lv_edmac = (struct edmac_mmio *)RAW_LV_ED
  * and http://www.magiclantern.fm/forum/index.php?topic=18393
  */
 
-#ifdef CONFIG_DIGIC_V
+#ifndef RAW_TYPE_REGISTER
+  #ifdef CONFIG_DIGIC_V
     #define RAW_TYPE_REGISTER 0xC0F37014
     #define PREFERRED_RAW_TYPE 0x10         /* CCD; also valid for DIGIC 6 */
-#elif defined(CONFIG_DIGIC_IV)
+  #elif defined(CONFIG_DIGIC_IV)
     #define RAW_TYPE_REGISTER 0xC0F08114    /* PACK32_ISEL */
     #define PREFERRED_RAW_TYPE 0x5          /* DIGIC 4: CCD */
+  #endif
 #endif
 
-#if defined(CONFIG_DIGIC_IV) || defined(CONFIG_DIGIC_V)
+#ifndef SHAD_GAIN_REGISTER
+  #if defined(CONFIG_DIGIC_IV) || defined(CONFIG_DIGIC_V)
     #define SHAD_GAIN_REGISTER 0xC0F08030
+  #endif
 #endif
 
 
@@ -2624,7 +2628,7 @@ void raw_lv_request_bpp(int bpp)
             MODE_12BIT = 0x010,
             MODE_10BIT = 0x000,
         };
-    #elif defined(CONFIG_200D) | defined(CONFIG_6D2) | defined(CONFIG_7D2)
+    #elif defined(CONFIG_200D) | defined(CONFIG_6D2) | defined(CONFIG_7D2) | defined(CONFIG_80D)
     // FIXME currently doesn't do anything for 6D2 or 7D2 since
     // EngDrvOut() is a nop there.  Some definition of the enum is required to build.
     // See 200D for a safe filtered EngDrvOut() - which probably should be more

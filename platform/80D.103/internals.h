@@ -33,3 +33,10 @@
 
 /* Mirror ML console printf() to UART so QEMU serial captures module loading */
 #define CONFIG_COPY_CONSOLE_TO_UART
+
+/* Raw LiveView support — enables raw.c capture path, raw overlays,
+ * and is prerequisite for mlv_lite module.
+ * EDMAC channel 2 (0xD0004200) delivers raw sensor data in LiveView.
+ * Using non-slurp path (same as 7D2) — raw_lv_edmac reads from
+ * RAW_LV_EDMAC_CHANNEL_ADDR MMIO registers for buffer/resolution. */
+#define CONFIG_RAW_LIVEVIEW

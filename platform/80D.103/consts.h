@@ -75,10 +75,10 @@
 #define YUV422_LV_BUFFER_DISPLAY_ADDR DV_VRAM_ACTIVE
 #define YUV422_LV_PITCH               720
 
-    /* First-guess: inherited from 7D2 (same DIGIC 6 silicon, channel EDMAC_WRITE_14 = ch33).
-       0xD0004200 = 0xD0000000 + 33 * 0x200. Verify by tracing SetEDmac calls during LiveView.
-       If wrong, edmac_scan.mo identifies the correct channel. */
-    #define RAW_LV_EDMAC_CHANNEL_ADDR 0xd0004200
+    /* EDMAC channel 2 base address for raw LiveView on DIGIC 6.
+       Same as 7D2 — channel 2, bank 0 (0xD0004200 = 0xD0004000 + 2*0x100).
+       Used by raw.c non-slurp path to read buffer addr / resolution from MMIO. */
+    #define RAW_LV_EDMAC_CHANNEL_ADDR 0xD0004200
 
     #define YUV422_HD_BUFFER_DMA_ADDR 0x0 // it expects this to be shamem_read(some_DMA_ADDR)
 
@@ -136,6 +136,27 @@ extern int winsys_bmp_dirty_bit_neg;
     #define MVR_BYTES_WRITTEN MEM((212 + MVR_190_STRUCT))
 
     #define IMGPLAY_ZOOM_LEVEL_ADDR (0x2CBC) //wrong, code looks different
+
+/* ── Raw LiveView / EDMAC constants ──
+ * SRM_BUFFER_SIZE: shoot-mode memory buffer (used for raw_lv_realloc_buffer).
+ * Copied from 7D2.112 (same DIGIC 6 silicon). */
+#define SRM_BUFFER_SIZE 0x2314000
+
+/* DIGIC 6 photo-mode raw EDMAC — channel 2, register bank 0xD0004xxx
+ * (DIGIC 4/5 used 0xC0F04xxx at 0x200 stride; DIGIC 6 uses 0xD0004xxx at 0x100 stride) */
+#define RAW_PHOTO_EDMAC 0xD0004200
+
+/* Raw type register — PACK32_ISEL equivalent on DIGIC 6.
+ * Controls raw data path selection (CCD/CMOS → EDMAC).
+ * Address 0xD0008114 is the DIGIC 6 equivalent of 0xC0F08114 (DIGIC 4)
+ * and 0xC0F37014 (DIGIC 5).  Safe to write via EngDrvOut. */
+#define RAW_TYPE_REGISTER 0xD0008114
+#define PREFERRED_RAW_TYPE 0x10  /* CCD type, same as DIGIC 5 */
+
+/* Shadow gain register — exposure compensation in raw stream.
+ * 0xD0008030: DIGIC 6 equivalent of 0xC0F08030 (DIGIC 4/5).
+ * Copied from 7D2.112 (untested on 80D hardware). */
+#define SHAD_GAIN_REGISTER 0xD0008030
 
 //address of XimrContext structure to redraw in FEATURE_VRAM_RGBA
 //*0xfe44fbd4 + 0x10 is pointer to XimrContext struct

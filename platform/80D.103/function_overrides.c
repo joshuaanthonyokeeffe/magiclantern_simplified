@@ -28,6 +28,7 @@
 #include <consts.h>
 #include <lens.h>
 #include <edmac.h>
+#include "mem.h"
 
 extern int uart_printf(const char * fmt, ...);
 
@@ -407,6 +408,76 @@ int set_IP_address(int interface, uint32_t client_IP,
     return 0;
 }
 
+static void edmac_builtin_test_task(void *unused);  /* forward decl */
+
+#ifdef CONFIG_RAW_LIVEVIEW
+/* QEMU LiveView state simulation.
+ *
+ * In QEMU, Canon's property system doesn't fire PROP_LV_ACTION
+ * (display hardware not connected), so `lv` stays 0 and all raw
+ * capture paths bail out early.  These helpers let us force LiveView
+ * state after boot so mlv_lite and raw overlays can run.
+ *
+ * Called from edmac_builtin_test_task after ML finishes booting.
+ */
+/* lv and shooting_mode are declared in propvalues.h (included via dryos.h) */
+
+static void qemu_simulate_lv_state(void)
+{
+    printf("[QEMU] Simulating LiveView active state\n");
+
+    /* Force LiveView flag — makes lv_running() return true */
+    lv = 1;
+
+    /* Force movie mode so is_movie_mode() returns true
+     * SHOOTMODE_MOVIE = 3 on most Canon cameras */
+    shooting_mode = 3;
+
+    printf("[QEMU] lv=%d shooting_mode=%d\n", lv, shooting_mode);
+}
+
+/* wait_lv_frames: normally in state-object.c inside CONFIG_STATE_OBJECT_HOOKS,
+ * which is disabled on 80D.  Provide a simple timing-based stub. */
+int wait_lv_frames(int num_frames)
+{
+    /* ~33ms per frame at 30fps */
+    msleep(num_frames * 33);
+    return 1;
+}
+
+/* Vsync simulation task.
+ * CONFIG_STATE_OBJECT_HOOKS is disabled on 80D, so the normal
+ * vsync_func() in state-object.c never fires.  This task periodically
+ * dispatches CBR_VSYNC so mlv_lite's raw_rec_vsync_cbr can run. */
+#include <module.h>
+
+static volatile int vsync_sim_running = 0;
+
+static void qemu_vsync_task(void *unused)
+{
+    (void)unused;
+    printf("[QEMU] Vsync simulation task started (30fps)\n");
+    vsync_sim_running = 1;
+
+    while (vsync_sim_running)
+    {
+        if (lv)
+        {
+            module_exec_cbr(CBR_VSYNC);
+            module_exec_cbr(CBR_VSYNC_SETPARAM);
+        }
+        msleep(33); /* ~30fps */
+    }
+
+    printf("[QEMU] Vsync simulation task stopped\n");
+}
+
+void qemu_start_vsync_sim(void)
+{
+    task_create("vsync_sim", 0x1e, 0x2000, qemu_vsync_task, 0);
+}
+#endif /* CONFIG_RAW_LIVEVIEW */
+
 #ifdef CONFIG_PLATFORM_POST_INIT
 /* Pre-initialize RGBA VRAM for QEMU.
  *
@@ -444,7 +515,7 @@ void platform_post_init(void)
 {
     uint8_t *buf = (uint8_t *)_AllocateMemory(960 * 540 * 4);
     if (!buf) {
-        uart_printf("[QEMU] platform_post_init: _AllocateMemory(%u) failed\n",
+        printf("[QEMU] platform_post_init: _AllocateMemory(%u) failed\n",
                     960 * 540 * 4);
         return;
     }
@@ -457,9 +528,13 @@ void platform_post_init(void)
     fake_marv.height       = 540;
     fake_marv.pmem         = NULL;
 
-    uart_printf("[QEMU] platform_post_init: buf=%p marv=%p\n",
+    printf("[QEMU] platform_post_init: buf=%p marv=%p\n",
                 buf, &fake_marv);
     _rgb_vram_info = &fake_marv;
+
+    /* Spawn EDMAC synthetic capture test task */
+    task_create("edmac_test", 0x1f, 0x4000, edmac_builtin_test_task, 0);
+    printf("[QEMU] edmac_test task created\n");
 }
 #endif /* CONFIG_PLATFORM_POST_INIT */
 
@@ -476,4 +551,200 @@ int XimrExe(void *ximr_context)
 {
     (void)ximr_context;
     return 0;
+}
+
+/* ── EDMAC Synthetic Capture Test (built-in, bypasses module system) ──
+ *
+ * Exercises the QEMU EDMAC harness by writing directly to EDMAC channel 2
+ * MMIO registers.  Runs as a DryOS task spawned from platform_post_init().
+ * Waits 8 seconds for full ML boot before starting.
+ *
+ * Enable QEMU harness with: QEMU_EOS_SYNTHETIC_EDMAC=2
+ * Output: ML/LOGS/EDMAC_TEST.RAW, ML/LOGS/EDMAC_TEST.TXT
+ */
+
+#define EDMAC_CH2_BASE      0xD0004200
+#define EDMAC_FRAME_W       1872
+#define EDMAC_FRAME_H       1060
+#define EDMAC_BPP           14
+#define EDMAC_LINE_BYTES    ((EDMAC_FRAME_W * EDMAC_BPP + 7) / 8)  /* 3276 */
+
+#define EDMAC_REG_CONTROL   0x00
+#define EDMAC_REG_FLAGS     0x04
+#define EDMAC_REG_ADDR      0x08
+#define EDMAC_REG_YN_XN     0x0C
+#define EDMAC_REG_YB_XB     0x10
+#define EDMAC_REG_YA_XA     0x14
+#define EDMAC_REG_OFF1A     0x18
+#define EDMAC_REG_OFF1B     0x1C
+#define EDMAC_REG_OFF2A     0x20
+#define EDMAC_REG_OFF2B     0x24
+#define EDMAC_REG_OFF3      0x28
+#define EDMAC_REG_IRQ       0x30
+#define EDMAC_REG_ABORT     0x34
+#define EDMAC_REG_CONN      0x40
+
+static inline void edmac_mmio_write(uint32_t off, uint32_t val)
+{
+    *(volatile uint32_t *)(EDMAC_CH2_BASE + off) = val;
+}
+
+static inline uint32_t edmac_mmio_read(uint32_t off)
+{
+    return *(volatile uint32_t *)(EDMAC_CH2_BASE + off);
+}
+
+static void edmac_builtin_test_task(void *unused)
+{
+    (void)unused;
+    /* Wait for ML to fully boot */
+    printf("[EDMAC_TEST] Task started, waiting 8s for boot...\n");
+    msleep(8000);
+    printf("[EDMAC_TEST] Woke up from sleep\n");
+
+#ifdef CONFIG_RAW_LIVEVIEW
+    qemu_simulate_lv_state();
+    qemu_start_vsync_sim();
+#endif
+
+    printf("[EDMAC_TEST] === Starting built-in synthetic capture test ===\n");
+
+    /* Write marker file to prove task is running */
+    FILE *f = FIO_CreateFile("ML/LOGS/EDMAC_TASK.TXT");
+    if (f) {
+        FIO_WriteFile(f, "task started\n", 13);
+        FIO_CloseFile(f);
+    }
+
+    uint32_t buf_size = (uint32_t)EDMAC_LINE_BYTES * EDMAC_FRAME_H;
+    printf("[EDMAC_TEST] Frame: %dx%d, %d bpp, %d bytes/line, total %d bytes\n",
+                EDMAC_FRAME_W, EDMAC_FRAME_H, EDMAC_BPP, EDMAC_LINE_BYTES, (int)buf_size);
+
+    /* Allocate via fio_malloc (uses shoot memory for DMA-capable large buffers) */
+    void *buf = fio_malloc(buf_size + 256);
+    if (!buf) {
+        printf("[EDMAC_TEST] fio_malloc failed, trying _AllocateMemory\n");
+        buf = _AllocateMemory(buf_size + 256);
+    }
+    if (!buf) {
+        printf("[EDMAC_TEST] ERROR: alloc %d bytes failed\n", (int)(buf_size + 256));
+        return;
+    }
+
+    /* Align to 64 bytes */
+    void *aligned = (void *)(((uint32_t)buf + 63) & ~63);
+    printf("[EDMAC_TEST] Buffer: raw=0x%08X aligned=0x%08X\n",
+                (uint32_t)buf, (uint32_t)aligned);
+
+    /* Zero buffer */
+    memset(aligned, 0, buf_size);
+
+    /* Configure EDMAC channel 2 registers */
+    edmac_mmio_write(EDMAC_REG_IRQ, 0);
+    edmac_mmio_write(EDMAC_REG_ABORT, 0);
+    edmac_mmio_write(EDMAC_REG_ADDR, (uint32_t)aligned);
+    edmac_mmio_write(EDMAC_REG_YN_XN, ((EDMAC_FRAME_H - 1) << 16) | EDMAC_LINE_BYTES);
+    edmac_mmio_write(EDMAC_REG_YB_XB, 0);
+    edmac_mmio_write(EDMAC_REG_YA_XA, 0);
+    edmac_mmio_write(EDMAC_REG_OFF1A, EDMAC_LINE_BYTES);
+    edmac_mmio_write(EDMAC_REG_OFF1B, 0);
+    edmac_mmio_write(EDMAC_REG_OFF2A, 0);
+    edmac_mmio_write(EDMAC_REG_OFF2B, 0);
+    edmac_mmio_write(EDMAC_REG_OFF3, 0);
+    edmac_mmio_write(EDMAC_REG_CONN, 0);
+
+    printf("[EDMAC_TEST] Registers configured. Starting transfer...\n");
+
+    /* START — writing 1 to control triggers QEMU harness */
+    edmac_mmio_write(EDMAC_REG_CONTROL, 1);
+
+    /* Poll for completion (harness fills synchronously, should be immediate) */
+    int timeout = 100;
+    uint32_t irq = 0;
+    while (timeout > 0) {
+        irq = edmac_mmio_read(EDMAC_REG_IRQ);
+        if (irq & 0x02) break;
+        msleep(10);
+        timeout--;
+    }
+
+    if (!(irq & 0x02)) {
+        printf("[EDMAC_TEST] ERROR: Timeout (IRQ=0x%X). Is QEMU_EOS_SYNTHETIC_EDMAC=2 set?\n", irq);
+        return;
+    }
+
+    printf("[EDMAC_TEST] Transfer complete! IRQ=0x%02X\n", irq);
+
+    /* Verify buffer */
+    uint8_t *data = (uint8_t *)aligned;
+    int nonzero = 0;
+    for (uint32_t i = 0; i < buf_size; i++) {
+        if (data[i] != 0) nonzero++;
+    }
+    printf("[EDMAC_TEST] Buffer: %d/%d bytes non-zero (%d%%)\n",
+                nonzero, (int)buf_size, (int)(buf_size ? nonzero * 100 / (int)buf_size : 0));
+
+    /* Sample top line (colour bars) */
+    printf("[EDMAC_TEST] Top: ");
+    for (int i = 0; i < 5; i++) {
+        uint32_t x = (i * EDMAC_LINE_BYTES) / 5;
+        uart_printf("[%d]=0x%02X ", (int)x, data[x]);
+    }
+    uart_printf("\n");
+
+    /* Sample middle line (gradient) */
+    uint32_t mid = (EDMAC_FRAME_H / 2) * EDMAC_LINE_BYTES;
+    printf("[EDMAC_TEST] Mid: ");
+    for (int i = 0; i < 5; i++) {
+        uint32_t x = (i * EDMAC_LINE_BYTES) / 5;
+        uart_printf("[%d]=0x%02X ", (int)x, data[mid + x]);
+    }
+    uart_printf("\n");
+
+    /* Try multiple save paths (QEMU SD card I/O varies) */
+    const char *paths[] = {
+        "B:/EDMAC_TEST.RAW",
+        "A:/EDMAC_TEST.RAW",
+        "ML/LOGS/EDMAC_TEST.RAW",
+        "EDMAC_TEST.RAW",
+        NULL
+    };
+    int saved = 0;
+    for (int p = 0; paths[p] && !saved; p++) {
+        printf("[EDMAC_TEST] Trying save: %s\n", paths[p]);
+        f = FIO_CreateFile(paths[p]);
+        if (f) {
+            FIO_WriteFile(f, aligned, buf_size);
+            FIO_CloseFile(f);
+            printf("[EDMAC_TEST] Saved %d bytes to %s\n", (int)buf_size, paths[p]);
+            saved = 1;
+        }
+    }
+    if (!saved) {
+        printf("[EDMAC_TEST] WARNING: Could not save to any path (QEMU limitation)\n");
+    }
+
+    /* Dump hex sample of first 64 bytes via UART for external verification */
+    printf("[EDMAC_TEST] Hex dump (first 64 bytes):\n");
+    for (int row = 0; row < 4; row++) {
+        uart_printf("  %04X: ", row * 16);
+        for (int col = 0; col < 16; col++) {
+            uart_printf("%02X ", data[row * 16 + col]);
+        }
+        uart_printf("\n");
+    }
+
+    /* Dump bottom-third sample (checkerboard region) */
+    uint32_t bot = ((EDMAC_FRAME_H * 2 / 3) + 4) * EDMAC_LINE_BYTES;
+    printf("[EDMAC_TEST] Checkerboard (y=%d, first 64 bytes):\n",
+                (int)((EDMAC_FRAME_H * 2 / 3) + 4));
+    for (int row = 0; row < 4; row++) {
+        uart_printf("  %04X: ", (int)(bot + row * 16));
+        for (int col = 0; col < 16; col++) {
+            uart_printf("%02X ", data[bot + row * 16 + col]);
+        }
+        uart_printf("\n");
+    }
+
+    printf("[EDMAC_TEST] === TEST COMPLETE ===\n");
 }

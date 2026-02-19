@@ -46,3 +46,23 @@
 // - AF_DONT_CHANGE path skips lens_setup_af → no null pointer crash
 // - lens_focus is entirely property-based (PROP_LV_LENS_DRIVE_REMOTE)
 #define FEATURE_FOCUS_STACKING
+
+// Raw LiveView features — enabled by CONFIG_RAW_LIVEVIEW in internals.h
+// all_features.h auto-enables FEATURE_RAW_HISTOGRAM and FEATURE_RAW_SPOTMETER
+// from CONFIG_RAW_LIVEVIEW; additional raw overlays enabled here:
+// FEATURE_RAW_ZEBRAS: disabled for now — zebra.c forward decl issue with DIGIC 6
+// FEATURE_RAW_FOCUS_PEAKING: needs focus_peaking.c integration
+// #define FEATURE_RAW_ZEBRAS
+// #define FEATURE_RAW_FOCUS_PEAKING
+
+// Raw photo overlays (review mode)
+#define CONFIG_RAW_PHOTO
+
+// FPS override — auto-enabled by all_features.h (FEATURE_FPS_OVERRIDE, FEATURE_FPS_RAMPING)
+// Required stubs: all present (shamem_read, SetHPTimerAfterNow, SetTimerAfter, CancelTimer)
+// FPS registers: defined in fps-engio_per_cam.h (0xD0006008/0xD0006014/0xD0006000)
+// Status: compiles clean, needs hardware verification
+
+// CMOS/ADTG register writes — NOT available on any DIGIC 6 camera
+// Blocks: dual_iso, crop_rec
+// Requires: ROM1.BIN dump → Ghidra search for "CMOS[%d]write" / "ADTG_WRITE"
